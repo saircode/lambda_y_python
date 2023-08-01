@@ -22,10 +22,12 @@ def lambda_handler(event, context):
     try:
         response = session.get(url, params=parameters)
         data = json.loads(response.text)
-        print(data)
-        saveResponse(data)  # llamo a la funcion que guarda los datos en la BD
+        return saveResponse(data)  # llamo a la funcion que guarda los datos en la BD
     except (ConnectionError, Timeout, TooManyRedirects) as e:
-        print(e)
+        return {
+            "statusCode": 500,
+            "body": "Error al obtener los registros desde la base de datos ".format(e)
+        }
 
 
 def saveResponse(data):
@@ -36,8 +38,6 @@ def saveResponse(data):
         'database': 'CoinMarketCap.'
     }
     data_to_insert = []
-
-    connection = mysql.connector.connect(**db_config)
 
     # Extraer los campos necesarios y agregarlos a la lista data_to_insert
     for key, value in data["data"].items():
@@ -67,14 +67,70 @@ def saveResponse(data):
         # Ejecutar la inserción de datos en la base de datos
         cursor.executemany(insert_query, data_to_insert)
         connection.commit()
-        print("Datos insertados correctamente")
+        # print(data)
 
     except mysql.connector.Error as error:
-        print("Error al insertar datos: {}".format(error))
+        return {
+            "statusCode": 500,
+            "body": "Error al obtener los registros desde la base de datos ".format(error)
+        }
 
     finally:
         # Cerrar el cursor y la conexión
         if connection.is_connected():
             cursor.close()
             connection.close()
-            print("Conexión a la base de datos cerrada")
+            return getDbData(db_config)
+            # print("Conexión a la base de datos cerrada")
+
+
+def getDbData(db_config):
+    # Nuevamente se establece la conexión con la base de datos
+    connection = mysql.connector.connect(**db_config)
+
+    try:
+        cursor = connection.cursor()
+
+        # Consulta SELECT para traer todos los registros de la tabla "tu_tabla"
+        select_query = "SELECT * FROM updates"
+
+        # Ejecutar la consulta SELECT
+        cursor.execute(select_query)
+
+        # Obtener todos los registros
+        records = cursor.fetchall()
+
+        # Convertir los registros a formato JSON
+        records_json = []
+        for record in records:
+            # Convertir cada registro a un diccionario
+            record_dict = [
+                {
+                    "symbol": record[0],
+                    "price": record[1],
+                    "date_added": record[2].isoformat(),
+                    "last_updated": record[3].isoformat(),
+                    "id": record[4]
+                }]
+            records_json.append(record_dict)
+
+       # Cerrar el cursor y la conexión
+        cursor.close()
+        connection.close()
+
+        # Crear la respuesta HTTP con el resultado JSON
+        return {
+            "statusCode": 200,
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "body": json.dumps(records_json, indent=2)
+        }
+
+    except mysql.connector.Error as error:
+         # Crear una respuesta de error en caso de que falle la consulta
+        response = {
+            "statusCode": 500,
+            "body": "Error al obtener los registros desde la base de datos ".format(error)
+        }
+        return response
